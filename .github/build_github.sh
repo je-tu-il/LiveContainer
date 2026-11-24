@@ -7,7 +7,7 @@ brew install ldid
 mv "$archive_path.xcarchive/Products/Applications" Payload
 
 # temporarily move sidestore support framrwork to tmp before zip
-mkdir tmp
+mkdir -p tmp
 mv Payload/LiveContainer.app/Frameworks/SideStoreSupport.framework ./tmp
 
 zip -r "$scheme.ipa" "Payload" -x "._*" -x ".DS_Store" -x "__MACOSX"
@@ -41,7 +41,9 @@ mv ./tmp/SideStoreSupport.framework Payload/LiveContainer.app/Frameworks
 
 # download SideStore
 cd tmp
-wget https://github.com/LiveContainer/SideStore/releases/download/nightly/SideStore.ipa
+if [ ! -f SideStore.ipa ]; then
+  wget https://github.com/LiveContainer/SideStore/releases/download/nightly/SideStore.ipa
+fi
 unzip SideStore.ipa
 cd ..
 

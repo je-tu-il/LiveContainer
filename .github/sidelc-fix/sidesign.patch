@@ -1,0 +1,84 @@
+diff --git a/Sources/Anisette/AnisetteDataManager.swift b/Sources/Anisette/AnisetteDataManager.swift
+index 8c64485..0dd50e6 100644
+--- a/Sources/Anisette/AnisetteDataManager.swift
++++ b/Sources/Anisette/AnisetteDataManager.swift
+@@ -434,7 +434,8 @@ public final class AnisetteDataManager: @unchecked Sendable {
+         }
+ 
+         let clientInfo = headers?.clientInfo ?? Constants.Anisette.defaultClientInfo
+-        let client = try await getClient(for: resolvedMode, clientInfo: clientInfo)
++        let userAgent = headers?.userAgent ?? Constants.Anisette.defaultUserAgent
++        let client = try await getClient(for: resolvedMode, clientInfo: clientInfo, userAgent: userAgent)
+ 
+         do {
+             let (rawHeaders, newBlob) = try await client.getAnisetteData(
+@@ -470,14 +471,14 @@ public final class AnisetteDataManager: @unchecked Sendable {
+         }
+     }
+ 
+-    private func getClient(for mode: AnisetteMode, clientInfo: String) async throws -> AnisetteClient {
++    private func getClient(for mode: AnisetteMode, clientInfo: String, userAgent: String = Constants.Anisette.defaultUserAgent) async throws -> AnisetteClient {
+         switch mode {
+         case .remote(let server):
+             try FileManager.default.createDirectory(at: provisioningDir, withIntermediateDirectories: true)
+             return try AnisetteClient(
+                 provisioningDir: provisioningDir,
+                 clientInfo: clientInfo,
+-                userAgent: Constants.Anisette.defaultUserAgent,
++                userAgent: userAgent,
+                 lookupURL: Constants.Anisette.URLs.grandSlamLookup,
+                 requiredLibraries: Constants.Anisette.Libraries.requiredNames,
+                 provider: RemoteAnisetteDataProvider(serverURL: server)
+@@ -489,7 +490,7 @@ public final class AnisetteDataManager: @unchecked Sendable {
+             return try AnisetteClient(
+                 provisioningDir: targetProvDir,
+                 clientInfo: clientInfo,
+-                userAgent: Constants.Anisette.defaultUserAgent,
++                userAgent: userAgent,
+                 lookupURL: Constants.Anisette.URLs.grandSlamLookup,
+                 requiredLibraries: Constants.Anisette.Libraries.requiredNames,
+                 libraryDirectoryResolver: { libDir }
+diff --git a/Sources/Constants.swift b/Sources/Constants.swift
+index 53d3070..e034177 100644
+--- a/Sources/Constants.swift
++++ b/Sources/Constants.swift
+@@ -15,13 +15,13 @@ public enum Constants {
+         public static let service        = "iCloud"
+         public static let headerVersion  = "1.0.1"
+         public static let authApp        = "com.apple.gs.xcode.auth"
+-        public static let userAgent      = "AuthKit/1 (Macintosh; OS X 26.6) (com.apple.dt.Xcode/26.0)"
++        public static let userAgent      = "akd/1.0 CFNetwork/3896.300.31 Darwin/27.3.0"
+     }
+ 
+     // https://idmsa.apple.com/appleauth/auth/devices
+     public enum AppleAuth {
+         public static let appIDKey   = "ba2ec180e6ca6e6c6a542255453b24d6e6e5b2be0cc48bc1b0d8ad64cfe0228f"
+-        public static let userAgent  = "AuthKit/1 (Macintosh; OS X 26.6)"
++        public static let userAgent  = "akd/1.0 CFNetwork/3896.300.31 Darwin/27.3.0"
+     }
+ 
+     // https://developerservices2.apple.com/services/
+diff --git a/Sources/DeveloperPortal/Authentication.swift b/Sources/DeveloperPortal/Authentication.swift
+index 0b8e0f2..50af63c 100644
+--- a/Sources/DeveloperPortal/Authentication.swift
++++ b/Sources/DeveloperPortal/Authentication.swift
+@@ -317,9 +317,18 @@ public extension DeveloperPortal {
+         request.httpMethod = "POST"
+         request.httpBody = plistData
+ 
++        let normalizedClientInfo = anisetteData.clientInfo.replacingOccurrences(of: "<macOS;", with: "<Mac OS X;")
+         let headers: [String: String] = [
+             "Content-Type": "text/x-xml-plist",
+-            "X-MMe-Client-Info": anisetteData.clientInfo,
++            "X-MMe-Client-Info": normalizedClientInfo,
++            "X-Mme-Device-Id": anisetteData.deviceID,
++            "X-Apple-I-MD": anisetteData.oneTimePassword,
++            "X-Apple-I-MD-M": anisetteData.machineID,
++            "X-Apple-I-MD-RINFO": anisetteData.routingInfo,
++            "X-Apple-I-MD-LU": anisetteData.localUserID,
++            "X-Apple-I-Client-Time": anisetteData.clientTime,
++            "X-Apple-I-TimeZone": anisetteData.timeZone,
++            "X-Apple-Locale": anisetteData.locale,
+             "Accept": "*/*",
+             "User-Agent": h.grandSlam.userAgent,
+             "Connection": "close"

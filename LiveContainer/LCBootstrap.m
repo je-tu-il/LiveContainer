@@ -556,7 +556,7 @@ static NSString* invokeAppMain(NSString *selectedApp, NSString *selectedContaine
     // which if symlinked, the new tmp cannot be recreated (#1040, #1125) or the app may camplain about the tmp folder being a symlimk (#884)
 
     // Setup directories
-    NSArray *dirList = @[@"Library/Caches", @"Library/Cookies", @"Documents", @"SystemData"];
+    NSArray *dirList = @[@"Library/Caches", @"Library/Cookies", @"Library/Application Support", @"Library/Preferences", @"Documents", @"SystemData"];
     for (NSString *dir in dirList) {
         NSString *dirPath = [newHomePath stringByAppendingPathComponent:dir];
         [fm createDirectoryAtPath:dirPath withIntermediateDirectories:YES attributes:nil error:nil];

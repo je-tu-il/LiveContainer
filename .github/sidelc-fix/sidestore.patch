@@ -1,0 +1,149 @@
+diff --git a/AltStore/Core/Extensions/UserDefaults+AltStore.swift b/AltStore/Core/Extensions/UserDefaults+AltStore.swift
+index 9c7201e..421b345 100644
+--- a/AltStore/Core/Extensions/UserDefaults+AltStore.swift
++++ b/AltStore/Core/Extensions/UserDefaults+AltStore.swift
+@@ -552,7 +552,7 @@ public extension UserDefaults
+             #keyPath(UserDefaults.menuAnisetteURL): AppConstants.Anisette.Servers.defaultServerURL,
+             #keyPath(UserDefaults.isAnisetteOfflineMode): false,
+             #keyPath(UserDefaults.disableAnisetteRotation): false,
+-            #keyPath(UserDefaults.useOnDeviceAnisette): true,
++            #keyPath(UserDefaults.useOnDeviceAnisette): false,
+             #keyPath(UserDefaults.useLocalVPN): true,
+             #keyPath(UserDefaults.acceptIPv6ConnectionConfig): false,
+             #keyPath(UserDefaults.isAutoRetryRemotePairingPortEnabled): true,
+diff --git a/AltStore/Info.plist b/AltStore/Info.plist
+index 868efe8..df6b9cd 100644
+--- a/AltStore/Info.plist
++++ b/AltStore/Info.plist
+@@ -3,7 +3,7 @@
+ <plist version="1.0">
+ <dict>
+ 	<key>ALTAnisetteURL</key>
+-	<string>https://ani.sidestore.io</string>
++	<string>https://new.ani.sidestore.io</string>
+ 	<key>CFBundleDevelopmentRegion</key>
+ 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+ 	<key>CFBundleDocumentTypes</key>
+diff --git a/SideStore/AppConstants.swift b/SideStore/AppConstants.swift
+index de03a9c..6737141 100644
+--- a/SideStore/AppConstants.swift
++++ b/SideStore/AppConstants.swift
+@@ -96,7 +96,7 @@ public enum AppConstants {
+ 
+         public enum Servers {
+             public static let defaultSource        = "https://servers.sidestore.io/servers.json"
+-            public static let defaultServerURL     = "https://ani.sidestore.io"
++            public static let defaultServerURL     = "https://new.ani.sidestore.io"
+             public static let connectivityCheckURL = URL(string: "https://www.apple.com/library/test/success.html")!
+         }
+ 
+diff --git a/SideStore/Core/Anisette/AnisetteConfigManager.swift b/SideStore/Core/Anisette/AnisetteConfigManager.swift
+index 161f608..e00d3bd 100644
+--- a/SideStore/Core/Anisette/AnisetteConfigManager.swift
++++ b/SideStore/Core/Anisette/AnisetteConfigManager.swift
+@@ -130,8 +130,11 @@ public actor AnisetteConfigManager {
+             return config
+         }()
+ 
+-        let resolvedClientInfo   = (udClientInfo?.isEmpty == false ? udClientInfo : fileConfig?.clientInfo) ?? AppConstants.Anisette.defaultClientInfo
+-        let resolvedUserAgent    = (udUserAgent?.isEmpty == false ? udUserAgent : fileConfig?.userAgent) ?? AppConstants.Anisette.defaultUserAgent
++        let rawClientInfo      = (udClientInfo?.isEmpty == false ? udClientInfo : fileConfig?.clientInfo) ?? AppConstants.Anisette.defaultClientInfo
++        let rawUserAgent       = (udUserAgent?.isEmpty == false ? udUserAgent : fileConfig?.userAgent) ?? AppConstants.Anisette.defaultUserAgent
++        let isLegacyClientInfo = rawClientInfo.contains("<macOS;") || rawClientInfo.contains("10.12.6;16G29")
++        let resolvedClientInfo = isLegacyClientInfo ? AppConstants.Anisette.defaultClientInfo : rawClientInfo
++        let resolvedUserAgent  = (isLegacyClientInfo || rawUserAgent.contains("Darwin/16.7.0") || rawUserAgent.contains("com.apple.dt.Xcode")) ? AppConstants.Anisette.defaultUserAgent : rawUserAgent
+         let resolvedDeviceID     = (udDeviceID?.isEmpty == false ? udDeviceID : fileConfig?.customDeviceID)
+         let resolvedLocalUserID  = (udLocalUserID?.isEmpty == false ? udLocalUserID : fileConfig?.customLocalUserID)
+         let resolvedLocale       = (udLocale?.isEmpty == false ? udLocale : fileConfig?.customLocale)
+diff --git a/SideStore/Core/Anisette/AnisetteProvider.swift b/SideStore/Core/Anisette/AnisetteProvider.swift
+index bd62860..dcced6b 100644
+--- a/SideStore/Core/Anisette/AnisetteProvider.swift
++++ b/SideStore/Core/Anisette/AnisetteProvider.swift
+@@ -10,10 +10,23 @@ import Foundation
+ import SideSign
+ 
+ enum AnisetteProvider {
++    private static let macPreferredServerStrings = [
++        "https://new.ani.sidestore.io",
++        "https://mac-ani.jkcoxson.com",
++        "https://anisette.lillq.me"
++    ]
++
+     static func fetch(handler: AnisetteServerHandler? = nil) async throws -> ALTAnisetteData {
+         if UserDefaults.standard.useOnDeviceAnisette {
+             debugLog("[AnisetteProvider] Fetching anisette via On-Device Anisette (ODA)...")
+-            return try await OnDeviceAnisetteManager.shared.fetchAnisetteData()
++            do {
++                return try await OnDeviceAnisetteManager.shared.fetchAnisetteData()
++            } catch {
++                debugLog("[AnisetteProvider] ODA failed (\(error.localizedDescription)); falling back to remote Mac Anisette server...")
++                UserDefaults.standard.useOnDeviceAnisette = false
++                AnisetteConfigManager.shared.anisetteAdiBlob = nil
++                return try await fetchRemote(handler: handler)
++            }
+         } else {
+             debugLog("[AnisetteProvider] Fetching anisette via remote server...")
+             return try await fetchRemote(handler: handler)
+@@ -21,14 +34,31 @@ enum AnisetteProvider {
+     }
+ 
+     private static func fetchRemote(handler: AnisetteServerHandler? = nil) async throws -> ALTAnisetteData {
+-        let serverUrlStrings = await AnisetteServersManager.shared.getActiveServerURLs()
+-        let servers = serverUrlStrings.compactMap { URL(string: $0) }
+-        guard !servers.isEmpty else {
++        var serverUrlStrings = await AnisetteServersManager.shared.getActiveServerURLs()
++        if serverUrlStrings.isEmpty {
++            _ = try? await AnisetteServersManager.shared.syncWithRemote()
++            serverUrlStrings = await AnisetteServersManager.shared.getActiveServerURLs()
++        }
++        if serverUrlStrings.isEmpty {
++            serverUrlStrings = macPreferredServerStrings
++        }
++
++        let rawServers = serverUrlStrings.compactMap { URL(string: $0) }
++        guard !rawServers.isEmpty else {
+             throw AnisetteError.noServersConfigured
+         }
+ 
++        let macPreferredSet = Set(macPreferredServerStrings)
++        let prioritizedMacServers = macPreferredServerStrings.compactMap { addr in
++            rawServers.first(where: { $0.absoluteString == addr }) ?? URL(string: addr)
++        }
++        let otherServers = rawServers.filter { !macPreferredSet.contains($0.absoluteString) }
++        let servers = UserDefaults.standard.disableAnisetteRotation ? rawServers : (prioritizedMacServers + otherServers)
++
+         let lastServer = UserDefaults.standard.menuAnisetteURL
+-        let startIndex = servers.firstIndex(where: { $0.absoluteString == lastServer }) ?? 0
++        let startIndex = (!UserDefaults.standard.disableAnisetteRotation && !macPreferredSet.contains(lastServer))
++            ? 0
++            : (servers.firstIndex(where: { $0.absoluteString == lastServer }) ?? 0)
+ 
+         let provider = SideSign.AnisetteDataManager.shared
+         let existingBlob = AnisetteConfigManager.shared.anisetteAdiBlob.flatMap { Data(base64Encoded: $0) }
+diff --git a/SideStore/MaintenanceManager.swift b/SideStore/MaintenanceManager.swift
+index 84edde4..6abe98b 100644
+--- a/SideStore/MaintenanceManager.swift
++++ b/SideStore/MaintenanceManager.swift
+@@ -14,7 +14,7 @@ public final class MaintenanceManager {
+     public static let shared = MaintenanceManager()
+ 
+     // Increment this counter whenever you want to trigger another maintenance pass in future updates
+-    public static let currentMaintenanceCounter = 7
++    public static let currentMaintenanceCounter = 8
+ 
+     public static let maintenanceCounterFileName = ".maintenance_counter"
+ 
+@@ -75,6 +75,13 @@ public final class MaintenanceManager {
+                 SideSignConfigManager.shared.resetToDefaults()
+             case 7:
+                 await migratePairingFiles()
++            case 8:
++                UserDefaults.standard.useOnDeviceAnisette = false
++                UserDefaults.standard.menuAnisetteURL = AppConstants.Anisette.Servers.defaultServerURL
++                AnisetteConfigManager.shared.resetToDefaults()
++                SideSignConfigManager.shared.resetToDefaults()
++                AnisetteConfigManager.shared.anisetteAdiBlob = nil
++                AnisetteDataManager.shared.clearCache()
+             default:
+                 break
+             }

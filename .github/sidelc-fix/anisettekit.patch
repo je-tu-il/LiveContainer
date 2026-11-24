@@ -1,0 +1,82 @@
+diff --git a/Sources/AnisetteClient.swift b/Sources/AnisetteClient.swift
+index 900cc1b..7bb1a35 100644
+--- a/Sources/AnisetteClient.swift
++++ b/Sources/AnisetteClient.swift
+@@ -10,6 +10,9 @@ import Foundation
+ #if canImport(FoundationNetworking)
+ import FoundationNetworking
+ #endif
++#if canImport(CryptoKit)
++import CryptoKit
++#endif
+ import anisette_core
+ 
+ public enum ProvisioningStorage: Equatable, Sendable {
+@@ -131,6 +134,20 @@ extension AnisetteClient {
+         }
+     }
+ 
++    private static func derivedLocalUserID(for identifier: UUID) -> String? {
++        #if canImport(CryptoKit)
++        return SHA256.hash(data: Data(identifier.uuidBytes))
++            .map { String(format: "%02x", $0) }
++            .joined()
++        #else
++        return nil
++        #endif
++    }
++
++    private static func sanitizeClientInfo(_ clientInfo: String) -> String {
++        clientInfo.replacingOccurrences(of: "<macOS;", with: "<Mac OS X;")
++    }
++
+     private func fetchHeaders(
+         identifier: UUID,
+         storage: ProvisioningStorage,
+@@ -158,11 +175,15 @@ extension AnisetteClient {
+             .with {
+                 $0.oneTimePassword = response.oneTimePassword
+                 $0.machineID       = response.machineID
++                if customHeaders?.localUserID == nil, let derivedLU = Self.derivedLocalUserID(for: identifier) {
++                    $0.localUserID = derivedLU
++                }
+                 if $0.deviceID == nil { $0.deviceID = identifier.uuidString.uppercased() }
+                 if let storedRinfo = getStoredRoutingInfo(for: identifier) { $0.routingInfo = storedRinfo }
+                 if $0.date == nil && $0.clientTime == nil { $0.date = Date() }
+                 if customHeaders?.clientInfo == nil { $0.clientInfo = self.clientInfo }
+                 if customHeaders?.userAgent == nil { $0.userAgent = self.userAgent }
++                if let ci = $0.clientInfo { $0.clientInfo = Self.sanitizeClientInfo(ci) }
+             }
+ 
+         return (AnisetteHeadersDTO.toDictionary(from: headers), generatedBlob)
+@@ -335,11 +356,15 @@ extension AnisetteClient {
+         let headers = AnisetteRequestHeaders.defaultHeaders
+             .applyingOverrides(customHeaders)
+             .with {
++                if customHeaders?.localUserID == nil, let derivedLU = Self.derivedLocalUserID(for: identifier) {
++                    $0.localUserID = derivedLU
++                }
+                 if $0.deviceID == nil { $0.deviceID = identifier.uuidString.uppercased() }
+                 if let routingInfo { $0.routingInfo = routingInfo }
+                 if $0.date == nil && $0.clientTime == nil { $0.date = Date() }
+                 if customHeaders?.clientInfo == nil { $0.clientInfo = self.clientInfo }
+                 if customHeaders?.userAgent == nil { $0.userAgent = self.userAgent }
++                if let ci = $0.clientInfo { $0.clientInfo = Self.sanitizeClientInfo(ci) }
+             }
+ 
+         let dict = AnisetteHeadersDTO.toDictionary(from: headers)
+diff --git a/Sources/Constants.swift b/Sources/Constants.swift
+index a3acb92..49baabd 100644
+--- a/Sources/Constants.swift
++++ b/Sources/Constants.swift
+@@ -9,8 +9,8 @@
+ import Foundation
+ 
+ public enum AnisetteConstants {
+-    public static let defaultClientInfo     = "<MacBookPro18,3> <macOS;26.6;25F84> <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
+-    public static let defaultUserAgent      = "AuthKit/1 (Macintosh; OS X 26.6) (com.apple.akd/1.0)"
++    public static let defaultClientInfo     = "<MacBookAir10,1> <Mac OS X;27.3;26C5035r> <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
++    public static let defaultUserAgent      = "akd/1.0 CFNetwork/3896.300.31 Darwin/27.3.0"
+     public static let defaultRoutingInfo    = "17106176"    // 0x01050500 default US routing code 
+     public static let defaultLocalUserID    = "0000000000000000000000000000000000000000000000000000000000000001"
+     public static let defaultSerialNumber   = "0"
